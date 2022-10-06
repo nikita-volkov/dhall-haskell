@@ -9,7 +9,9 @@
 -- | Implementation of the @dhall to-directory-tree@ subcommand
 module Dhall.DirectoryTree
     ( -- * Filesystem
-      toDirectoryTree
+      DirectoryTreeOptions(..)
+    , defaultDirectoryTreeOptions
+    , toDirectoryTree
     , FilesystemError(..)
 
       -- * Low-level types and functions
@@ -20,7 +22,7 @@ module Dhall.DirectoryTree
 
 import Control.Applicative       (empty)
 import Control.Exception         (Exception)
-import Control.Monad             (unless)
+import Control.Monad             (unless, when)
 import Data.Either.Validation    (Validation (..))
 import Data.Functor.Identity     (Identity (..))
 import Data.Maybe                (fromMaybe)
@@ -37,7 +39,7 @@ import Dhall.Syntax
     , RecordField (..)
     , Var (..)
     )
-import System.FilePath           ((</>))
+import System.FilePath           ((</>), isAbsolute, splitDirectories, takeDirectory)
 import System.PosixCompat.Types  (FileMode, GroupID, UserID)
 
 import qualified Control.Exception           as Exception
@@ -55,6 +57,25 @@ import qualified System.Directory            as Directory
 import qualified System.PosixCompat.Files    as Posix
 import qualified System.PosixCompat.User     as Posix
 
+{- | Options affecting the interpretation of a directory tree specification.
+-}
+data DirectoryTreeOptions = DirectoryTreeOptions
+    { allowAbsolute :: Bool
+      -- ^ Whether to allow absolute paths in the spec.
+    , allowParent :: Bool
+      -- ^ Whether to allow ".." in the spec.
+    , allowSeparators :: Bool
+      -- ^ Whether to allow path separators in file names.
+    }
+
+-- | The default 'DirectoryTreeOptions'. All flags are set to 'False'.
+defaultDirectoryTreeOptions :: DirectoryTreeOptions
+defaultDirectoryTreeOptions = DirectoryTreeOptions
+    { allowAbsolute = False
+    , allowParent = False
+    , allowSeparators = False
+    }
+
 {-| Attempt to transform a Dhall record into a directory tree where:
 
     * Records are translated into directories
@@ -67,7 +88,7 @@ import qualified System.PosixCompat.User     as Posix
 
     * There is a more advanced way to construct directory trees using a fixpoint
       encoding. See the documentation below on that.
-    
+
     For example, the following Dhall record:
 
     > { dir = { `hello.txt` = "Hello\n" }
@@ -172,11 +193,11 @@ import qualified System.PosixCompat.User     as Posix
     that cannot be converted as-is.
 -}
 toDirectoryTree
-    :: Bool -- ^ Whether to allow path separators in file names or not
+    :: DirectoryTreeOptions
     -> FilePath
     -> Expr Void Void
     -> IO ()
-toDirectoryTree allowSeparators path expression = case expression of
+toDirectoryTree opts path expression = case expression of
     RecordLit keyValues ->
         Map.unorderedTraverseWithKey_ process $ recordFieldValue <$> keyValues
 
@@ -192,10 +213,10 @@ toDirectoryTree allowSeparators path expression = case expression of
         Text.IO.writeFile path text
 
     Some value ->
-        toDirectoryTree allowSeparators path value
+        toDirectoryTree opts path value
 
     App (Field (Union _) _) value -> do
-        toDirectoryTree allowSeparators path value
+        toDirectoryTree opts path value
 
     App None _ ->
         return ()
@@ -206,7 +227,7 @@ toDirectoryTree allowSeparators path expression = case expression of
     Lam _ _ (Lam _ _ _) -> do
         entries <- decodeDirectoryTree expression
 
-        processFilesystemEntryList allowSeparators path entries
+        processFilesystemEntryList opts path entries
 
     _ ->
         die
@@ -222,39 +243,23 @@ toDirectoryTree allowSeparators path expression = case expression of
         empty
 
     process key value = do
-        case keyPathSegments of
-            -- Fail if path is absolute, which is a security risk.
-            "" : _ ->
-                die
-            -- Detect Windows absolute paths like "C:".
-            [_ , ':'] : _ ->
-                die
-            -- Fail if separators are not allowed by the option.
-            _ : _ | not allowSeparators ->
-                die
-            _ ->
-                return ()
+        -- Fail if path is absolute, which is a security risk.
+        when (not (allowAbsolute opts) && isAbsolute keyPath) die
 
         -- Fail if path contains attempts to go to container directory,
         -- which is a security risk.
-        if elem ".." keyPathSegments
-            then die
-            else return ()
+        when (not (allowParent opts) && ".." `elem` keyPathSegments) die
 
-        (dirPath, fileName) <- case reverse keyPathSegments of
-            h : t ->
-                return
-                    ( Foldable.foldl' (</>) path (reverse t)
-                    , h )
-            _ ->
-                die
+        -- Fail if separators are not allowed by the option.
+        when (not (allowSeparators opts) && length keyPathSegments > 1) die
 
-        Directory.createDirectoryIfMissing True dirPath
+        Directory.createDirectoryIfMissing (allowSeparators opts) $ takeDirectory path'
 
-        toDirectoryTree allowSeparators (dirPath </> fileName) value
+        toDirectoryTree opts path' value
       where
-        keyPathSegments =
-            fmap Text.unpack $ Text.splitOn "/" key
+        keyPath = Text.unpack key
+        keyPathSegments = splitDirectories keyPath
+        path' = path </> keyPath
 
     die = Exception.throwIO FilesystemError{..}
       where
@@ -305,11 +310,11 @@ getGroup (GroupName name) = Posix.groupID <$> Posix.getGroupEntryForName name
 
 -- | Process a `FilesystemEntry`. Writes the content to disk and apply the
 -- metadata to the newly created item.
-processFilesystemEntry :: Bool -> FilePath -> FilesystemEntry -> IO ()
-processFilesystemEntry allowSeparators path (DirectoryEntry entry) = do
+processFilesystemEntry :: DirectoryTreeOptions -> FilePath -> FilesystemEntry -> IO ()
+processFilesystemEntry opts path (DirectoryEntry entry) = do
     let path' = path </> entryName entry
-    Directory.createDirectoryIfMissing allowSeparators path'
-    processFilesystemEntryList allowSeparators path' $ entryContent entry
+    Directory.createDirectoryIfMissing (allowSeparators opts) path'
+    processFilesystemEntryList opts path' $ entryContent entry
     -- It is important that we write the metadata after we wrote the content of
     -- the directories/files below this directory as we might lock ourself out
     -- by changing ownership or permissions.
@@ -323,9 +328,9 @@ processFilesystemEntry _ path (FileEntry entry) = do
     applyMetadata entry path'
 
 -- | Process a list of `FilesystemEntry`s.
-processFilesystemEntryList :: Bool -> FilePath -> Seq FilesystemEntry -> IO ()
-processFilesystemEntryList allowSeparators path = Foldable.traverse_
-    (processFilesystemEntry allowSeparators path)
+processFilesystemEntryList :: DirectoryTreeOptions -> FilePath -> Seq FilesystemEntry -> IO ()
+processFilesystemEntryList opts path = Foldable.traverse_
+    (processFilesystemEntry opts path)
 
 -- | Set the metadata of an object referenced by a path.
 applyMetadata :: Entry a -> FilePath -> IO ()

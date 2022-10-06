@@ -31,6 +31,9 @@ tests = testGroup "to-directory-tree"
 #endif
         , fixpointedUserGroup
         ]
+    , testGroup "path separators"
+        [ issue1305
+        ]
     ]
 
 fixpointedType :: TestTree
@@ -46,14 +49,14 @@ fixpointedEmpty :: TestTree
 fixpointedEmpty = testCase "empty" $ do
     let outDir = "./tests/to-directory-tree/fixpoint-empty.out"
         path = "./tests/to-directory-tree/fixpoint-empty.dhall"
-    entries <- runDirectoryTree False outDir path
+    entries <- runDirectoryTree defaultDirectoryTreeOptions outDir path
     entries @?= [Directory outDir]
 
 fixpointedSimple :: TestTree
 fixpointedSimple = testCase "simple" $ do
     let outDir = "./tests/to-directory-tree/fixpoint-simple.out"
         path = "./tests/to-directory-tree/fixpoint-simple.dhall"
-    entries <- runDirectoryTree False outDir path
+    entries <- runDirectoryTree defaultDirectoryTreeOptions outDir path
     entries @?=
         [ Directory outDir
         , File $ outDir </> "file"
@@ -69,7 +72,7 @@ fixpointedPermissions :: TestTree
 fixpointedPermissions = testCase "permissions" $ do
     let outDir = "./tests/to-directory-tree/fixpoint-permissions.out"
         path = "./tests/to-directory-tree/fixpoint-permissions.dhall"
-    entries <- runDirectoryTree False outDir path
+    entries <- runDirectoryTree defaultDirectoryTreeOptions outDir path
     entries @?=
         [ Directory outDir
         , File $ outDir </> "file"
@@ -100,8 +103,20 @@ fixpointedUserGroup = testCase "user and group" $ do
             }
         ]
 
-runDirectoryTree :: Bool -> FilePath -> FilePath -> IO [WalkEntry]
-runDirectoryTree allowSeparators outDir path = do
+issue1305 :: TestTree
+issue1305 = testCase "separators in map keys" $ do
+    let outDir = "./tests/to-directory-tree/T1305.out"
+        path = "./tests/to-directory-tree/T1305.dhall"
+        opts = defaultDirectoryTreeOptions { allowSeparators = True }
+    entries <- runDirectoryTree opts outDir path
+    entries @?=
+        [ Directory outDir
+        , Directory $ outDir </> "A"
+        , File $ outDir </> "A/B"
+        ]
+
+runDirectoryTree :: DirectoryTreeOptions -> FilePath -> FilePath -> IO [WalkEntry]
+runDirectoryTree opts outDir path = do
     doesOutDirExist <- Directory.doesDirectoryExist outDir
     when doesOutDirExist $
         Directory.removeDirectoryRecursive outDir
@@ -114,7 +129,7 @@ runDirectoryTree allowSeparators outDir path = do
             $ Dhall.defaultInputSettings
     expr <- Dhall.inputExprWithSettings inputSettings text
 
-    toDirectoryTree allowSeparators outDir $ Dhall.Core.denote expr
+    toDirectoryTree opts outDir $ Dhall.Core.denote expr
 
     walkFsTree outDir
 
