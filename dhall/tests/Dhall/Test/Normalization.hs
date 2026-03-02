@@ -69,6 +69,7 @@ customization =
     Tasty.testGroup "customization"
         [ simpleCustomization
         , nestedReduction
+        , textReplaceConstructedEscaped
         ]
 
 simpleCustomization :: TestTree
@@ -112,6 +113,12 @@ nestedReduction = Tasty.HUnit.testCase "doubleReduction" $ do
     e <- Test.Util.codeWith tyCtx "wurble 6"
 
     Test.Util.assertNormalizesToWith valCtx e "5"
+
+textReplaceConstructedEscaped :: TestTree
+textReplaceConstructedEscaped = Tasty.HUnit.testCase "textReplaceConstructedEscaped" $ do
+    Test.Util.equivalent
+        "\\(x : Text) -> Text/replace \".\" \"!\" \".${x}\""
+        "\\(x : Text) -> \"!${x}\""
 
 alphaNormalizationTest :: Text -> TestTree
 alphaNormalizationTest prefix = do
