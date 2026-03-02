@@ -669,6 +669,18 @@ eval !env t0 =
                                                     replacement
                                                     haystackText
                                                 )
+                                VTextLit (VChunks xys z) ->
+                                    case replacement of
+                                        VTextLit (VChunks [] replacementText) ->
+                                            VTextLit
+                                                (VChunks
+                                                    [ (Text.replace needleText replacementText x, y)
+                                                    | (x, y) <- xys
+                                                    ]
+                                                    (Text.replace needleText replacementText z)
+                                                )
+                                        _ ->
+                                            VTextReplace needle replacement haystack
                                 _ ->
                                     VTextReplace needle replacement haystack
                         _ ->
