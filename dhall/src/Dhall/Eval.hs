@@ -680,7 +680,16 @@ eval !env t0 =
                                                     (Text.replace needleText replacementText z)
                                                 )
                                         _ ->
-                                            VTextReplace needle replacement haystack
+                                            -- Abstract (or interpolated) replacement:
+                                            -- apply vTextReplace to each concrete text
+                                            -- portion in the chunks, threading through
+                                            -- the abstract interpolations unchanged.
+                                            let processChunk (x, y) =
+                                                    vTextReplace needleText replacement x
+                                                    <> VChunks [("", y)] mempty
+                                                chunks' = map processChunk xys
+                                                trailing = vTextReplace needleText replacement z
+                                            in  VTextLit (mconcat chunks' <> trailing)
                                 _ ->
                                     VTextReplace needle replacement haystack
                         _ ->
