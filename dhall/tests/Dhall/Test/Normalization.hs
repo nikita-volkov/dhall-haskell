@@ -70,6 +70,9 @@ customization =
         [ simpleCustomization
         , nestedReduction
         , textReplaceConstructedEscaped
+        , textReplaceChunkedAbstractReplacement
+        , textReplaceChunkedMultipleNeedles
+        , textReplaceChunkedTrailingText
         ]
 
 simpleCustomization :: TestTree
@@ -119,6 +122,31 @@ textReplaceConstructedEscaped = Tasty.HUnit.testCase "textReplaceConstructedEsca
     Test.Util.equivalent
         "\\(x : Text) -> Text/replace \".\" \"!\" \".${x}\""
         "\\(x : Text) -> \"!${x}\""
+
+-- | `Text/replace` with a chunked haystack (containing an abstract variable
+-- interpolation) and a completely abstract replacement should reduce: the
+-- replacement is applied to each concrete text portion in the chunks.
+textReplaceChunkedAbstractReplacement :: TestTree
+textReplaceChunkedAbstractReplacement = Tasty.HUnit.testCase "textReplaceChunkedAbstractReplacement" $ do
+    Test.Util.equivalent
+        "\\(x : Text) -> \\(r : Text) -> Text/replace \"\\n\" r \"a\\nb${x}\""
+        "\\(x : Text) -> \\(r : Text) -> \"a${r}b${x}\""
+
+-- | `Text/replace` on a chunked haystack where the needle appears multiple
+-- times in the concrete text prefix before an abstract interpolation.
+textReplaceChunkedMultipleNeedles :: TestTree
+textReplaceChunkedMultipleNeedles = Tasty.HUnit.testCase "textReplaceChunkedMultipleNeedles" $ do
+    Test.Util.equivalent
+        "\\(x : Text) -> \\(r : Text) -> Text/replace \".\" r \"a.b.c${x}\""
+        "\\(x : Text) -> \\(r : Text) -> \"a${r}b${r}c${x}\""
+
+-- | `Text/replace` on a chunked haystack where the needle appears in the
+-- trailing text (after the last abstract interpolation).
+textReplaceChunkedTrailingText :: TestTree
+textReplaceChunkedTrailingText = Tasty.HUnit.testCase "textReplaceChunkedTrailingText" $ do
+    Test.Util.equivalent
+        "\\(x : Text) -> \\(r : Text) -> Text/replace \".\" r \"${x}a.b\""
+        "\\(x : Text) -> \\(r : Text) -> \"${x}a${r}b\""
 
 alphaNormalizationTest :: Text -> TestTree
 alphaNormalizationTest prefix = do
