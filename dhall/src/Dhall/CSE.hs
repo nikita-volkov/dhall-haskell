@@ -203,12 +203,14 @@ hasNoVars = not . Lens.anyOf (Lens.cosmosOf subExpressions) isVar
 exprSize :: Expr Void a -> Int
 exprSize = length . Lens.foldMapOf (Lens.cosmosOf subExpressions) (:[])
 
--- | Collect all variable and binder names that appear in an expression.
+-- | Collect all variable and binder names that appear in a single expression
+--   node (not recursively - this is called via 'Lens.cosmosOf' which handles
+--   the recursive traversal).
 --   Used to generate fresh names for CSE bindings.
 exprNames :: Expr s a -> Set Text
 exprNames = \case
-    Var (V name _)                  -> Set.singleton name
-    Lam _ (FunctionBinding _ x _ _ _) _ -> Set.singleton x
-    Pi  _ x _ _                    -> Set.singleton x
-    Let (Binding _ x _ _ _ _) _    -> Set.singleton x
-    _                               -> Set.empty
+    Var (V name _)                             -> Set.singleton name
+    Lam _ FunctionBinding{functionBindingVariable = x} _ -> Set.singleton x
+    Pi  _ x _ _                               -> Set.singleton x
+    Let (Binding _ x _ _ _ _) _               -> Set.singleton x
+    _                                          -> Set.empty
