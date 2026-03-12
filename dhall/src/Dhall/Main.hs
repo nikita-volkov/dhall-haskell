@@ -89,6 +89,7 @@ import qualified Data.Text.IO
 import qualified Dhall
 import qualified Dhall.Binary
 import qualified Dhall.Core
+import qualified Dhall.CSE
 import qualified Dhall.Diff
 import qualified Dhall.DirectoryTree                as DirectoryTree
 import qualified Dhall.Format
@@ -148,6 +149,7 @@ data Mode
           , semanticCacheMode :: SemanticCacheMode
           }
     | Normalize { file :: Input , alpha :: Bool }
+    | CSE { file :: Input, output :: Output }
     | Repl
     | Format { deprecatedInPlace :: Bool, transitivity :: Transitivity, outputMode :: OutputMode, inputs :: NonEmpty Input }
     | Freeze { deprecatedInPlace :: Bool, transitivity :: Transitivity, all_ :: Bool, cache :: Bool, outputMode :: OutputMode, inputs :: NonEmpty Input }
@@ -263,6 +265,11 @@ parseMode =
             "lint"
             "Improve Dhall code by using newer language features and removing dead code"
             (Lint <$> deprecatedInPlace <*> parseTransitiveSwitch <*> parseCheck "linted" <*> parseFiles)
+    <|> subcommand
+            Manipulate
+            "cse"
+            "Eliminate common subexpressions from a Dhall expression"
+            (CSE <$> parseFile <*> parseOutput)
     <|> subcommand
             Manipulate
             "rewrite-with-schemas"
@@ -826,6 +833,25 @@ command (Options {..}) = do
                     else normalizedExpression
 
             render System.IO.stdout characterSet alphaNormalizedExpression
+
+        CSE {..} -> do
+            (expression, characterSet) <- getExpressionAndCharacterSet file
+
+            let denotedExpression = Dhall.Core.denote expression
+
+            let csedExpression = Dhall.CSE.cse denotedExpression
+
+            let renotedExpression =
+                    Dhall.Core.renote csedExpression :: Expr Src Import
+
+            case output of
+                StandardOutput ->
+                    render System.IO.stdout characterSet renotedExpression
+
+                OutputFile file_ ->
+                    writeDocToFile
+                        file_
+                        (Dhall.Pretty.prettyCharacterSet characterSet renotedExpression)
 
         Type {..} -> do
             (expression, characterSet) <- getExpressionAndCharacterSet file
