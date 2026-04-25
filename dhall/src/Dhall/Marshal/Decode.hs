@@ -84,9 +84,7 @@ module Dhall.Marshal.Decode
     , pairFromMapEntry
       -- ** Functions
     , function
-    , functionSafe
     , functionWith
-    , functionWithSafe
       -- ** Records
     , RecordDecoder(..)
     , record
@@ -1163,12 +1161,6 @@ function
     -> Decoder (a -> b)
 function = functionWith defaultInputNormalizer
 
-functionSafe
-    :: Encoder a
-    -> Decoder b
-    -> Decoder (a -> Either ExtractErrors b)
-functionSafe = functionWithSafe defaultInputNormalizer
-
 {-| Decode a Dhall function into a Haskell function using the specified normalizer.
 
 >>> f <- input (functionWith defaultInputNormalizer inject bool) "Natural/even" :: IO (Natural -> Bool)
@@ -1190,28 +1182,6 @@ functionWith inputNormalizer (Encoder {..}) (Decoder extractIn expectedIn) =
     extractOut e = pure (\i -> case extractIn (Core.normalizeWith normalizer_ (App e (embed i))) of
         Success o  -> o
         Failure e -> error ("FromDhall: You cannot decode a function if it does not have the correct type: " <> show e))
-
-    expectedOut = Pi mempty "_" declared <$> expectedIn
-
-{-| Decode a Dhall function into a Haskell function using the specified normalizer.
-
->>> f <- input (functionWith defaultInputNormalizer inject bool) "Natural/even" :: IO (Natural -> Bool)
->>> f 0
-True
->>> f 1
-False
--}
-functionWithSafe
-    :: InputNormalizer
-    -> Encoder a
-    -> Decoder b
-    -> Decoder (a -> Either ExtractErrors b)
-functionWithSafe inputNormalizer (Encoder {..}) (Decoder extractIn expectedIn) =
-    Decoder extractOut expectedOut
-  where
-    normalizer_ = Just (getInputNormalizer inputNormalizer)
-
-    extractOut e = pure (\i -> extractIn (Core.normalizeWith normalizer_ (App e (embed i))))
 
     expectedOut = Pi mempty "_" declared <$> expectedIn
 
