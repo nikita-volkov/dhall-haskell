@@ -363,6 +363,7 @@ Library
     Other-Modules:
         Dhall.Core.CSE
         Dhall.Core.DCE
+        Dhall.Core.Minify
         Dhall.DirectoryTree.Types
         Dhall.Eval
         Dhall.Import.Types
@@ -423,6 +424,7 @@ Test-Suite tasty
     Other-Modules:
         Dhall.Test.CSE
         Dhall.Test.DCE
+        Dhall.Test.Minify
         Dhall.Test.Dhall
         Dhall.Test.Diff
         Dhall.Test.DirectoryTree
