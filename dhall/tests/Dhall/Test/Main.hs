@@ -7,6 +7,7 @@ import Test.Tasty      (TestTree)
 import qualified Dhall.Test.Dhall
 import qualified Dhall.Test.Diff
 import qualified Dhall.Test.DirectoryTree
+import qualified Dhall.Test.Prune
 import qualified Dhall.Test.Format
 import qualified Dhall.Test.Freeze
 import qualified Dhall.Test.Import
@@ -44,6 +45,8 @@ getAllTests = do
 
     lintTests <- Dhall.Test.Lint.getTests
 
+    pruneTests <- Dhall.Test.Prune.getTests
+
     tagsTests <- Dhall.Test.Tags.getTests
 
     diffTests <- Dhall.Test.Diff.getTests
@@ -62,6 +65,7 @@ getAllTests = do
                 , typeinferenceTests
                 , formattingTests
                 , lintTests
+                , pruneTests
                 , diffTests
                 , semanticHashTests
                 , tagsTests
