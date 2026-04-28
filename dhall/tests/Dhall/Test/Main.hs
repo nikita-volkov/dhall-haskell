@@ -8,7 +8,7 @@ import qualified Dhall.Test.Dhall
 import qualified Dhall.Test.Diff
 import qualified Dhall.Test.DirectoryTree
 import qualified Dhall.Test.CSE
-import qualified Dhall.Test.Prune
+import qualified Dhall.Test.DCE
 import qualified Dhall.Test.Format
 import qualified Dhall.Test.Freeze
 import qualified Dhall.Test.Import
@@ -48,7 +48,7 @@ getAllTests = do
 
     cseTests <- Dhall.Test.CSE.getTests
 
-    pruneTests <- Dhall.Test.Prune.getTests
+    pruneTests <- Dhall.Test.DCE.getTests
 
     tagsTests <- Dhall.Test.Tags.getTests
 

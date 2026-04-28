@@ -817,7 +817,7 @@ command (Options {..}) = do
                 Dhall.Import.loadRelativeTo (rootDirectory file) semanticCacheMode expression
 
             let outputExpression
-                    | compact   = Dhall.Core.renote (Dhall.Core.cse (Dhall.Core.denote (Dhall.Core.pruneUselessRecordTrees resolvedExpression)))
+                    | compact   = Dhall.Core.renote (Dhall.Core.cse (Dhall.Core.denote (Dhall.Core.dce resolvedExpression)))
                     | otherwise = resolvedExpression
 
             render System.IO.stdout characterSet outputExpression

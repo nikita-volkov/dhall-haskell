@@ -1,8 +1,8 @@
 {-# LANGUAGE OverloadedStrings #-}
 
--- | Pruning passes used to remove unused record subtrees.
-module Dhall.Core.Prune
-    ( pruneUselessRecordTrees
+-- | Dead code elimination for Dhall expressions.
+module Dhall.Core.DCE
+    ( dce
     ) where
 
 import Data.Map.Strict (Map)
@@ -35,6 +35,18 @@ instance Semigroup Usage where
 
 instance Monoid Usage where
     mempty = Usage False mempty
+
+isUsageEmpty :: Usage -> Bool
+isUsageEmpty usage =
+    not (usageDirect usage) && Map.null (usageChildren usage)
+
+prependUsagePath :: [Text] -> Usage -> Usage
+prependUsagePath [] usage = usage
+prependUsagePath (field : fields) usage =
+    Usage
+        { usageDirect = False
+        , usageChildren = Map.singleton field (prependUsagePath fields usage)
+        }
 
 usageFromPath :: [Text] -> Usage
 usageFromPath [] = Usage True mempty
@@ -81,9 +93,22 @@ collectUsage target (Lam _ functionBinding body) =
 collectUsage target (Pi _ binderName domain codomain) =
     collectUsage target domain <> collectUsage (bumpIfSame binderName target) codomain
 collectUsage target (Let binding body) =
-    maybe mempty (collectUsage target . snd) (annotation binding)
-        <> collectUsage target (value binding)
-        <> collectUsage (bumpIfSame (variable binding) target) body
+    let boundVariableUsage = collectUsage (V (variable binding) 0) body
+        boundVariableIsUsed = not (isUsageEmpty boundVariableUsage)
+
+        valueUsage
+            | not boundVariableIsUsed = mempty
+            | Just prefix <- fieldPathOrRootFrom target (value binding) =
+                prependUsagePath prefix boundVariableUsage
+            | otherwise = collectUsage target (value binding)
+
+        annotationUsage
+            | boundVariableIsUsed = maybe mempty (collectUsage target . snd) (annotation binding)
+            | otherwise = mempty
+    in
+        annotationUsage
+            <> valueUsage
+            <> collectUsage (bumpIfSame (variable binding) target) body
 collectUsage target expression =
     foldMap (collectUsage target) (Lens.foldMapOf subExpressions (:[]) expression)
 
@@ -105,9 +130,9 @@ pruneRecordLit usage expression =
                 in  RecordLit (Dhall.Map.fromList keptFields)
         _ -> expression
 
--- | Remove record subtrees that are never selected from let-bound values.
-pruneUselessRecordTrees :: Expr s a -> Expr s a
-pruneUselessRecordTrees = go
+-- | Remove expression subtrees that are never used.
+dce :: Expr s a -> Expr s a
+dce = go
   where
     go expression =
         case Lens.over subExpressions go expression of
