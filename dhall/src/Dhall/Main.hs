@@ -448,7 +448,7 @@ parseMode =
     parseCompactFlag =
         Options.Applicative.switch
             (   Options.Applicative.long "compact"
-            <>  Options.Applicative.help "Apply common subexpression elimination to reduce output size"
+            <>  Options.Applicative.help "Compact the output by applying record tree pruning and common subexpression elimination"
             )
 
     parseQuiet =
@@ -817,7 +817,7 @@ command (Options {..}) = do
                 Dhall.Import.loadRelativeTo (rootDirectory file) semanticCacheMode expression
 
             let outputExpression
-                    | compact   = Dhall.Core.renote (Dhall.Core.cse (Dhall.Core.denote resolvedExpression))
+                    | compact   = Dhall.Core.renote (Dhall.Core.cse (Dhall.Core.denote (Dhall.Core.pruneUselessRecordTrees resolvedExpression)))
                     | otherwise = resolvedExpression
 
             render System.IO.stdout characterSet outputExpression
