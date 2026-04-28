@@ -50,11 +50,18 @@ bumpIfSame binderName (V targetName index)
     | otherwise                = V targetName index
 
 fieldPathFrom :: Var -> Expr s a -> Maybe [Text]
-fieldPathFrom target = go []
+fieldPathFrom target expression = do
+    path <- fieldPathOrRootFrom target expression
+
+    if null path then Nothing else Just path
+
+fieldPathOrRootFrom :: Var -> Expr s a -> Maybe [Text]
+fieldPathOrRootFrom target = go []
   where
+    go acc (Note _ expression) = go acc expression
     go acc (Field expression (FieldSelection _ label _)) = go (label : acc) expression
     go acc (Var variable_)
-        | variable_ == target && not (null acc) = Just acc
+        | variable_ == target = Just acc
     go _ _ = Nothing
 
 collectUsage :: Var -> Expr s a -> Usage
@@ -62,6 +69,12 @@ collectUsage target expression
     | Just path <- fieldPathFrom target expression = usageFromPath path
 collectUsage target (Var variable_)
     | variable_ == target = usageFromPath []
+collectUsage target (Project expression_ (Left fields))
+    | Just prefix <- fieldPathOrRootFrom target expression_ =
+        foldMap (\field -> usageFromPath (prefix <> [field])) fields
+    | otherwise = collectUsage target expression_
+collectUsage target (Project expression_ (Right projectionExpression)) =
+    collectUsage target expression_ <> collectUsage target projectionExpression
 collectUsage target (Lam _ functionBinding body) =
     collectUsage target (functionBindingAnnotation functionBinding)
         <> collectUsage (bumpIfSame (functionBindingVariable functionBinding) target) body
