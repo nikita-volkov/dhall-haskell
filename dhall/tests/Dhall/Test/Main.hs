@@ -9,6 +9,7 @@ import qualified Dhall.Test.Diff
 import qualified Dhall.Test.DirectoryTree
 import qualified Dhall.Test.CSE
 import qualified Dhall.Test.DCE
+import qualified Dhall.Test.Minify
 import qualified Dhall.Test.Format
 import qualified Dhall.Test.Freeze
 import qualified Dhall.Test.Import
@@ -50,6 +51,8 @@ getAllTests = do
 
     pruneTests <- Dhall.Test.DCE.getTests
 
+    minifyTests <- Dhall.Test.Minify.getTests
+
     tagsTests <- Dhall.Test.Tags.getTests
 
     diffTests <- Dhall.Test.Diff.getTests
@@ -70,6 +73,7 @@ getAllTests = do
                 , lintTests
                 , cseTests
                 , pruneTests
+                , minifyTests
                 , diffTests
                 , semanticHashTests
                 , tagsTests

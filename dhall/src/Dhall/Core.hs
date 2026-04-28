@@ -52,6 +52,7 @@ module Dhall.Core (
     , shallowDenote
     , cse
     , dce
+    , minify
     , freeIn
 
     -- * Pretty-printing
@@ -86,6 +87,7 @@ import Control.Monad.IO.Class (MonadIO (..))
 import Data.Text              (Text)
 import Dhall.Core.CSE         (cse)
 import Dhall.Core.DCE         (dce)
+import Dhall.Core.Minify      (minify)
 import Dhall.Normalize
 import Dhall.Pretty.Internal
 import Dhall.Src              (Src (..))
