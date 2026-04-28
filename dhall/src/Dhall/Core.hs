@@ -50,6 +50,7 @@ module Dhall.Core (
     , denote
     , renote
     , shallowDenote
+    , cse
     , dce
     , freeIn
 
@@ -83,6 +84,7 @@ module Dhall.Core (
 import Control.Exception      (Exception)
 import Control.Monad.IO.Class (MonadIO (..))
 import Data.Text              (Text)
+import Dhall.Core.CSE         (cse)
 import Dhall.Core.DCE       (dce)
 import Dhall.Normalize
 import Dhall.Pretty.Internal
