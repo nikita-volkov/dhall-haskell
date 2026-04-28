@@ -22,7 +22,7 @@ pruneDirectory = "./tests/Dhall/Test/Prune"
 
 getTests :: IO TestTree
 getTests = do
-    pruneTests <- Test.Util.discover (Turtle.chars <* "A.dhall") pruneTest (Turtle.lstree pruneDirectory)
+    pruneTests <- Test.Util.discover (Turtle.chars <* ".in.dhall") pruneTest (Turtle.lstree pruneDirectory)
 
     let testTree = Tasty.testGroup "Prune" [ pruneTests ]
 
@@ -39,8 +39,8 @@ format expr =
 pruneTest :: Text -> TestTree
 pruneTest prefix =
     Tasty.HUnit.testCase (Text.unpack prefix) $ do
-        let inputFile  = Text.unpack (prefix <> "A.dhall")
-        let outputFile = Text.unpack (prefix <> "B.dhall")
+        let inputFile  = Text.unpack (prefix <> ".in.dhall")
+        let outputFile = Text.unpack (prefix <> ".out.dhall")
 
         inputText <- Text.IO.readFile inputFile
 
@@ -54,6 +54,4 @@ pruneTest prefix =
 
         expectedText <- Text.IO.readFile outputFile
 
-        let message = "The pruned expression did not match the expected output"
-
-        Tasty.HUnit.assertEqual message expectedText actualText
+        Tasty.HUnit.assertEqual "The pruned expression did not match the expected output" expectedText actualText
