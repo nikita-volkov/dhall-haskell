@@ -141,7 +141,7 @@ data Mode
           { file :: Input
           , resolveMode :: Maybe ResolveMode
           , semanticCacheMode :: SemanticCacheMode
-          , compact :: Bool
+          , minify :: Bool
           }
     | Type
           { file :: Input
@@ -447,7 +447,7 @@ parseMode =
 
     parseCompactFlag =
         Options.Applicative.switch
-            (   Options.Applicative.long "compact"
+            (   Options.Applicative.long "minify"
             <>  Options.Applicative.help "Compact the output by applying record tree pruning and common subexpression elimination"
             )
 
@@ -817,7 +817,7 @@ command (Options {..}) = do
                 Dhall.Import.loadRelativeTo (rootDirectory file) semanticCacheMode expression
 
             let outputExpression
-                    | compact   = Dhall.Core.renote (Dhall.Core.cse (Dhall.Core.denote (Dhall.Core.dce resolvedExpression)))
+                    | minify    = Dhall.Core.renote (Dhall.Core.minify (Dhall.Core.denote resolvedExpression))
                     | otherwise = resolvedExpression
 
             render System.IO.stdout characterSet outputExpression
