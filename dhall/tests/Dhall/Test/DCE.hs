@@ -1,6 +1,6 @@
 {-# LANGUAGE OverloadedStrings #-}
 
-module Dhall.Test.Prune where
+module Dhall.Test.DCE (getTests) where
 
 import Data.Text    (Text)
 import Data.Void    (Void)
@@ -18,13 +18,13 @@ import qualified Test.Tasty.HUnit          as Tasty.HUnit
 import qualified Turtle
 
 pruneDirectory :: FilePath
-pruneDirectory = "./tests/Dhall/Test/Prune"
+pruneDirectory = "./tests/Dhall/Test/DCE"
 
 getTests :: IO TestTree
 getTests = do
-    pruneTests <- Test.Util.discover (Turtle.chars <* ".in.dhall") pruneTest (Turtle.lstree pruneDirectory)
+    tests <- Test.Util.discover (Turtle.chars <* ".in.dhall") test (Turtle.lstree pruneDirectory)
 
-    let testTree = Tasty.testGroup "Prune" [ pruneTests ]
+    let testTree = Tasty.testGroup "DCE" [ tests ]
 
     return testTree
 
@@ -36,8 +36,8 @@ format expr =
     in
         Doc.Render.Text.renderStrict docStream
 
-pruneTest :: Text -> TestTree
-pruneTest prefix =
+test :: Text -> TestTree
+test prefix =
     Tasty.HUnit.testCase (Text.unpack prefix) $ do
         let inputFile  = Text.unpack (prefix <> ".in.dhall")
         let outputFile = Text.unpack (prefix <> ".out.dhall")
@@ -48,7 +48,7 @@ pruneTest prefix =
 
         let denotedInput = Core.denote parsedInput
 
-        let actualExpression = Core.pruneUselessRecordTrees denotedInput
+        let actualExpression = Core.dce denotedInput
 
         let actualText = format actualExpression
 

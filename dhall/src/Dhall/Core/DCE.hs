@@ -1,8 +1,8 @@
 {-# LANGUAGE OverloadedStrings #-}
 
--- | Pruning passes used to remove unused record subtrees.
-module Dhall.Core.Prune
-    ( pruneUselessRecordTrees
+-- | Dead code elimination for Dhall expressions.
+module Dhall.Core.DCE
+    ( dce
     ) where
 
 import Data.Map.Strict (Map)
@@ -130,9 +130,9 @@ pruneRecordLit usage expression =
                 in  RecordLit (Dhall.Map.fromList keptFields)
         _ -> expression
 
--- | Remove record subtrees that are never selected from let-bound values.
-pruneUselessRecordTrees :: Expr s a -> Expr s a
-pruneUselessRecordTrees = go
+-- | Remove expression subtrees that are never used.
+dce :: Expr s a -> Expr s a
+dce = go
   where
     go expression =
         case Lens.over subExpressions go expression of

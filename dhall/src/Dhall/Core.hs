@@ -50,7 +50,7 @@ module Dhall.Core (
     , denote
     , renote
     , shallowDenote
-    , pruneUselessRecordTrees
+    , dce
     , freeIn
 
     -- * Pretty-printing
@@ -83,7 +83,7 @@ module Dhall.Core (
 import Control.Exception      (Exception)
 import Control.Monad.IO.Class (MonadIO (..))
 import Data.Text              (Text)
-import Dhall.Core.Prune       (pruneUselessRecordTrees)
+import Dhall.Core.DCE       (dce)
 import Dhall.Normalize
 import Dhall.Pretty.Internal
 import Dhall.Src              (Src (..))
