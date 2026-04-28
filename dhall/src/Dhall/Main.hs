@@ -141,7 +141,7 @@ data Mode
           { file :: Input
           , resolveMode :: Maybe ResolveMode
           , semanticCacheMode :: SemanticCacheMode
-          , cse :: Bool
+          , compact :: Bool
           }
     | Type
           { file :: Input
@@ -283,7 +283,7 @@ parseMode =
             Interpret
             "resolve"
             "Resolve an expression's imports"
-            (Resolve <$> parseFile <*> parseResolveMode <*> parseSemanticCacheMode <*> parseCseFlag)
+            (Resolve <$> parseFile <*> parseResolveMode <*> parseSemanticCacheMode <*> parseCompactFlag)
     <|> subcommand
             Interpret
             "type"
@@ -445,10 +445,10 @@ parseMode =
               )
         <|> pure Nothing
 
-    parseCseFlag =
+    parseCompactFlag =
         Options.Applicative.switch
-            (   Options.Applicative.long "cse"
-            <>  Options.Applicative.help "Apply common subexpression elimination to reduce output size"
+            (   Options.Applicative.long "compact"
+            <>  Options.Applicative.help "Compact the output by applying record tree pruning and common subexpression elimination"
             )
 
     parseQuiet =
@@ -817,7 +817,7 @@ command (Options {..}) = do
                 Dhall.Import.loadRelativeTo (rootDirectory file) semanticCacheMode expression
 
             let outputExpression
-                    | cse       = Dhall.Core.renote (Dhall.Core.cse (Dhall.Core.denote resolvedExpression))
+                    | compact   = Dhall.Core.renote (Dhall.Core.cse (Dhall.Core.denote (Dhall.Core.dce resolvedExpression)))
                     | otherwise = resolvedExpression
 
             render System.IO.stdout characterSet outputExpression
