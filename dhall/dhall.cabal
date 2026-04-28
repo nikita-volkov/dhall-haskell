@@ -362,6 +362,7 @@ Library
           Dhall.Deriving
     Other-Modules:
         Dhall.Core.CSE
+        Dhall.Core.Prune
         Dhall.DirectoryTree.Types
         Dhall.Eval
         Dhall.Import.Types
@@ -421,6 +422,7 @@ Test-Suite tasty
     Main-Is: Dhall/Test/Main.hs
     Other-Modules:
         Dhall.Test.CSE
+        Dhall.Test.Prune
         Dhall.Test.Dhall
         Dhall.Test.Diff
         Dhall.Test.DirectoryTree
