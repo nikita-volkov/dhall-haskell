@@ -95,6 +95,7 @@ unsafeSubExpressions _ NaturalOdd = pure NaturalOdd
 unsafeSubExpressions _ NaturalToInteger = pure NaturalToInteger
 unsafeSubExpressions _ NaturalShow = pure NaturalShow
 unsafeSubExpressions _ NaturalSubtract = pure NaturalSubtract
+unsafeSubExpressions _ NaturalEqual = pure NaturalEqual
 unsafeSubExpressions f (NaturalPlus a b) = NaturalPlus <$> f a <*> f b
 unsafeSubExpressions f (NaturalTimes a b) = NaturalTimes <$> f a <*> f b
 unsafeSubExpressions _ Integer = pure Integer
@@ -160,7 +161,7 @@ unhandledConstructor constructor =
     internalError
         (   "Dhall.Syntax.unsafeSubExpressions: Unhandled "
         <>  constructor
-        <>  " construtor"
+        <>  " constructor"
         )
 
 -- | Remove all `Note` constructors from an `Expr` (i.e. de-`Note`)
@@ -242,6 +243,7 @@ reservedIdentifiers = reservedKeywords <>
         , "Natural/toInteger"
         , "Natural/show"
         , "Natural/subtract"
+        , "Natural/equal"
         , "Integer"
         , "Integer/clamp"
         , "Integer/negate"
