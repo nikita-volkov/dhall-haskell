@@ -722,7 +722,8 @@ loadImportWithSemisemanticCache (Chained (Import (ImportHashed _ importType) Cod
 
         Nothing -> do
             let substitutedExpr =
-                  Dhall.Substitution.substitute resolvedExpr _substitutions
+                  Dhall.Substitution.substitute resolvedExpr
+                      (fmap (fmap absurd) _substitutions)
 
             let typer = makeImportTyper _cache
 
@@ -738,7 +739,7 @@ loadImportWithSemisemanticCache (Chained (Import (ImportHashed _ importType) Cod
                     importSemanticsType <-
                         case Dhall.TypeCheck.typeWithA typer startCtx substitutedExpr of
                             Left  err -> throwMissingImport (Imported _stack err)
-                            Right t   -> return (Core.renote t)
+                            Right t   -> return (Core.denote t)
 
                     return (ImportSemantics {..})
 
@@ -746,10 +747,12 @@ loadImportWithSemisemanticCache (Chained (Import (ImportHashed _ importType) Cod
                     importSemanticsType <-
                         case Dhall.TypeCheck.typeWithA typer startCtx substitutedExpr of
                             Left  err -> throwMissingImport (Imported _stack err)
-                            Right t   -> return (Core.renote t)
+                            Right t   -> return (Core.denote t)
 
+                    -- Normalize the expression, treating Embed Import values
+                    -- as opaque (ignored by any custom normalizer).
                     let betaNormal =
-                            Core.normalizeWith _normalizer substitutedExpr
+                            Core.normalize substitutedExpr
 
                     let importSemantics = betaNormal
 
@@ -1422,7 +1425,7 @@ expandImportsVoid cache expr = expr >>= \import_ ->
                    <> show (Core.pretty import_))
 
 encodeExpression :: Codec.Serialise.Serialise (Expr Void a) => Expr Void a -> Data.ByteString.ByteString
-encodeExpression = Dhall.Binary.encodeExpression
+encodeExpression = Data.ByteString.Lazy.toStrict . Dhall.Binary.encodeExpression
 
 -- | Hash a fully resolved expression.
 --   When the expression contains 'Embed Import' references (i.e. is an
