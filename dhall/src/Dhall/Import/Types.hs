@@ -49,10 +49,14 @@ newtype Chained = Chained
 instance Pretty Chained where
     pretty (Chained import_) = pretty import_
 
--- | An import that has been fully interpeted
-newtype ImportSemantics = ImportSemantics
-    { importSemantics :: Expr Void Void
+-- | An import that has been fully interpreted
+data ImportSemantics = ImportSemantics
+    { importSemantics :: Expr Void Import
     -- ^ The fully resolved import, typechecked and beta-normal.
+    --   Hashed sub-imports are preserved as opaque 'Embed' references
+    --   (Proposal 2: stop normalizing at integrity-checked import boundaries).
+    , importSemanticsType :: Expr Void Import
+    -- ^ The type of 'importSemantics', also in beta-normal form.
     }
 
 -- | `parent` imports (i.e. depends on) `child`

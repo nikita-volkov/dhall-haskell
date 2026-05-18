@@ -734,10 +734,13 @@ command (Options {..}) = do
 
             (expression, characterSet) <- getExpressionAndCharacterSet file
 
-            resolvedExpression <-
-                Dhall.Import.loadRelativeTo (rootDirectory file) semanticCacheMode expression
+            (resolvedExpression, importStatus) <-
+                Dhall.Import.loadRelativeToWithStatus (rootDirectory file) semanticCacheMode expression
 
-            inferredType <- Dhall.Core.throws (Dhall.TypeCheck.typeOf resolvedExpression)
+            let typer = Dhall.Import.makeImportTyper (Dhall.Import.Types._cache importStatus)
+
+            inferredType <- Dhall.Core.throws
+                (Dhall.TypeCheck.typeWithA typer mempty resolvedExpression)
 
             let normalizedExpression = Dhall.Core.normalize resolvedExpression
 
@@ -841,10 +844,13 @@ command (Options {..}) = do
         Type {..} -> do
             (expression, characterSet) <- getExpressionAndCharacterSet file
 
-            resolvedExpression <-
-                Dhall.Import.loadRelativeTo (rootDirectory file) semanticCacheMode expression
+            (resolvedExpression, importStatus) <-
+                Dhall.Import.loadRelativeToWithStatus (rootDirectory file) semanticCacheMode expression
 
-            inferredType <- Dhall.Core.throws (Dhall.TypeCheck.typeOf resolvedExpression)
+            let typer = Dhall.Import.makeImportTyper (Dhall.Import.Types._cache importStatus)
+
+            inferredType <- Dhall.Core.throws
+                (Dhall.TypeCheck.typeWithA typer mempty resolvedExpression)
 
             if quiet
                 then return ()
@@ -887,10 +893,12 @@ command (Options {..}) = do
         Hash {..} -> do
             expression <- getExpression file
 
-            resolvedExpression <-
-                Dhall.Import.loadRelativeTo (rootDirectory file) UseSemanticCache expression
+            (resolvedExpression, importStatus) <-
+                Dhall.Import.loadRelativeToWithStatus (rootDirectory file) UseSemanticCache expression
 
-            _ <- Dhall.Core.throws (Dhall.TypeCheck.typeOf resolvedExpression)
+            let typer = Dhall.Import.makeImportTyper (Dhall.Import.Types._cache importStatus)
+
+            _ <- Dhall.Core.throws (Dhall.TypeCheck.typeWithA typer mempty resolvedExpression)
 
             let normalizedExpression =
                     Dhall.Core.alphaNormalize (Dhall.Core.normalize resolvedExpression)
@@ -1021,8 +1029,11 @@ command (Options {..}) = do
         Text {..} -> do
             expression <- getExpression file
 
-            resolvedExpression <-
-                Dhall.Import.loadRelativeTo (rootDirectory file) UseSemanticCache expression
+            (resolvedExprI, importStatus) <-
+                Dhall.Import.loadRelativeToWithStatus (rootDirectory file) UseSemanticCache expression
+
+            let resolvedExpression =
+                    Dhall.Import.expandImports (Dhall.Import.Types._cache importStatus) resolvedExprI
 
             _ <- Dhall.Core.throws (Dhall.TypeCheck.typeOf (Annot resolvedExpression Dhall.Core.Text))
 
@@ -1055,8 +1066,11 @@ command (Options {..}) = do
         DirectoryTree {..} -> do
             expression <- getExpression file
 
-            resolvedExpression <-
-                Dhall.Import.loadRelativeTo (rootDirectory file) UseSemanticCache expression
+            (resolvedExprI, importStatus) <-
+                Dhall.Import.loadRelativeToWithStatus (rootDirectory file) UseSemanticCache expression
+
+            let resolvedExpression =
+                    Dhall.Import.expandImports (Dhall.Import.Types._cache importStatus) resolvedExprI
 
             _ <- Dhall.Core.throws (Dhall.TypeCheck.typeOf resolvedExpression)
 

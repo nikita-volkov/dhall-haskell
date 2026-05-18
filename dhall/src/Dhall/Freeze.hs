@@ -59,6 +59,7 @@ import qualified Data.Text.IO                       as Text.IO
 import qualified Dhall
 import qualified Dhall.Core                         as Core
 import qualified Dhall.Import
+import qualified Dhall.Import.Types
 import qualified Dhall.Pretty
 import qualified Dhall.TypeCheck
 import qualified Dhall.Util                         as Util
@@ -193,9 +194,11 @@ freezeImportWithSettings settings directory import_ = do
 
     let status = Dhall.Import.emptyStatusWithManager (view Dhall.newManager settings) directory
 
-    expression <- State.evalStateT (Dhall.Import.loadWith (Embed unprotectedImport)) status
+    (expression, status') <- State.runStateT (Dhall.Import.loadWith (Embed unprotectedImport)) status
 
-    case Dhall.TypeCheck.typeWith (view Dhall.startingContext settings) expression of
+    let typer = Dhall.Import.makeImportTyper (Dhall.Import.Types._cache status')
+
+    case Dhall.TypeCheck.typeWithA typer mempty expression of
         Left  exception -> Exception.throwIO exception
         Right _         -> return ()
 

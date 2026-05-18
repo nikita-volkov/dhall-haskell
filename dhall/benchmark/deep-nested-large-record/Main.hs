@@ -69,4 +69,4 @@ main =
         , bench "union performance" (unionPerformance p)
         ]
     ]
-  where prelude = Import.load (Core.Embed dhallPreludeImport)
+  where prelude = Import.loadFull (Core.Embed dhallPreludeImport)
