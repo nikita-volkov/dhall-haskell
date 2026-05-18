@@ -141,6 +141,14 @@ normalize :: Eq a => Expr s a -> Expr t a
 normalize = Eval.normalize
 {-# INLINE normalize #-}
 
+-- | Returns 'True' for any expression that is headed by a 'Lam' after
+-- stripping any number of leading 'Let' wrappers.  Used to decide whether
+-- a @let@ binding should be preserved in normal form.
+isLambdaHeaded :: Expr s a -> Bool
+isLambdaHeaded (Lam _ _ _) = True
+isLambdaHeaded (Let _ b)   = isLambdaHeaded b
+isLambdaHeaded _           = False
+
 {-| Reduce an expression to its normal form, performing beta reduction and applying
     any custom definitions.
 
@@ -396,11 +404,16 @@ normalizeWithM ctx e0 = loop (Syntax.denote e0)
                         case res2 of
                             Nothing -> pure (App f' a')
                             Just app' -> loop app'
-          Let (Binding _ f _ _ _ r) b -> loop b''
-            where
-              r'  = Syntax.shift   1  (V f 0) r
-              b'  = subst (V f 0) r' b
-              b'' = Syntax.shift (-1) (V f 0) b'
+          Let (Binding _ f _ _ _ r) b -> do
+              b_norm <- loop b
+              r_norm <- loop r
+              if isLambdaHeaded b_norm
+                  then pure (Let (Syntax.makeBinding f r_norm) b_norm)
+                  else do
+                      let r'  = Syntax.shift   1  (V f 0) r_norm
+                      let b'  = subst (V f 0) r' b_norm
+                      let b'' = Syntax.shift (-1) (V f 0) b'
+                      loop b''
           Annot x _ -> loop x
           Bool -> pure Bool
           BoolLit b -> pure (BoolLit b)
@@ -798,6 +811,7 @@ isNormalized e0 = loop (Syntax.denote e0)
       Pi _ _ a b -> loop a && loop b
       App f a -> loop f && loop a && case App f a of
           App (Lam _ _ _) _ -> False
+          App f' _ | isLambdaHeaded f' -> False
           App (App (App (App NaturalFold (NaturalLit _)) _) _) _ -> False
           App NaturalBuild _ -> False
           App NaturalIsZero (NaturalLit _) -> False
@@ -836,6 +850,14 @@ isNormalized e0 = loop (Syntax.denote e0)
           App (App (App TextReplace (TextLit (Chunks [] _))) _) (TextLit _) ->
               False
           _ -> True
+      -- A @let@-wrapped lambda is in normal form when:
+      --   1. the bound value is in normal form
+      --   2. the body is in normal form
+      --   3. the body is "lambda-headed" (a @Lam@ after stripping any number
+      --      of outer @let@s) — only outer lets that guard a lambda are
+      --      preserved by 'normalize'; any other @let@ is always inlined.
+      Let (Binding Nothing _ Nothing Nothing Nothing a) b
+          | isLambdaHeaded b -> loop a && loop b
       Let _ _ -> False
       Annot _ _ -> False
       Bool -> True
