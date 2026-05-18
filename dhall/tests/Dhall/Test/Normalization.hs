@@ -71,6 +71,8 @@ customization =
         , nestedReduction
         , naturalEqualTest
         , naturalLessThanTest
+        , letPreservationApplied
+        , letPreservationShadowing
         ]
 
 simpleCustomization :: TestTree
@@ -215,6 +217,39 @@ naturalLessThanTest = Tasty.HUnit.testCase "Natural/lessThan" $ do
     -- Test partial application (should not reduce)
     e6 <- Test.Util.codeWith tyCtx "Natural/lessThan 3"
     Test.Util.assertNormalizesToWith valCtx e6 "Natural/lessThan 3"
+
+-- | Regression test for the bug where 'wrapOuterLets' re-evaluated binding
+-- expressions with a Skip-only environment that was missing non-let captured
+-- values (e.g. lambda parameters).  When
+-- @(\\(x : Natural) -> let y = x in \\(z : Natural) -> y) 1@ was normalised,
+-- 'y = x' was preserved using the unevaluated expression @x@, but @x@ was not
+-- in scope in the quoting context so the emitted binding was @let y = x@ with
+-- @x@ unbound rather than @let y = 1@.
+letPreservationApplied :: TestTree
+letPreservationApplied = Tasty.HUnit.testCase "letPreservation/applied" $ do
+    input    <- Test.Util.code "(\\(x : Natural) -> let y = x in \\(z : Natural) -> y) 1"
+    expected <- Test.Util.code "let y = 1 in \\(z : Natural) -> y"
+    Tasty.HUnit.assertBool
+        "Applied lambda: inner let y=x should give y=1 in NF, not reference unbound x"
+        (Core.judgmentallyEqual
+            (Core.normalize input    :: Expr Void Void)
+            (Core.normalize expected :: Expr Void Void))
+
+-- | Regression test for the bug where a shadowing @let@ binding (same name as
+-- an enclosing lambda parameter) was still frozen to a 'Skip' in the closure
+-- environment even though it was omitted from the emitted lets.  This caused
+-- the lambda body to reference a free variable instead of the let-bound value.
+-- For @\\(x : Natural) -> let x = 1 in \\(y : Natural) -> x@, the inner
+-- @x@ should resolve to the let-bound @1@, not to the outer lambda parameter.
+letPreservationShadowing :: TestTree
+letPreservationShadowing = Tasty.HUnit.testCase "letPreservation/shadowing" $ do
+    input    <- Test.Util.code "\\(x : Natural) -> let x = 1 in \\(y : Natural) -> x"
+    expected <- Test.Util.code "\\(x : Natural) -> \\(y : Natural) -> 1"
+    Tasty.HUnit.assertBool
+        "Shadowing let: inner lambda body should see let-bound x=1 in NF, not lambda param"
+        (Core.judgmentallyEqual
+            (Core.normalize input    :: Expr Void Void)
+            (Core.normalize expected :: Expr Void Void))
 
 {- Unit tests don't type-check, so we only verify that they normalize to the
    expected output

@@ -54,6 +54,7 @@ module Dhall.Eval (
 import Data.Bifunctor     (first)
 import Data.ByteString    (ByteString)
 import Data.Foldable      (foldr', toList)
+import Data.List          (partition)
 import Data.List.NonEmpty (NonEmpty (..))
 import Data.Sequence      (Seq, ViewL (..), ViewR (..))
 import Data.Text          (Text)
@@ -89,8 +90,13 @@ import qualified Text.Printf   as Printf
 
 data Environment a
     = Empty
-    | Skip   !(Environment a) {-# UNPACK #-} !Text
-    | Extend !(Environment a) {-# UNPACK #-} !Text (Val a)
+    | Skip      !(Environment a) {-# UNPACK #-} !Text
+    | Extend    !(Environment a) {-# UNPACK #-} !Text (Val a)
+    -- | Like 'Extend', but marks the binding as an outer @let@-binding.
+    -- Stores the memoised evaluated value, used both for fast substitution by
+    -- 'vVar' and for re-quoting by 'quote' to preserve sharing across lambda
+    -- boundaries.
+    | LetBound  !(Environment a) {-# UNPACK #-} !Text (Val a)
 
 deriving instance (Show a, Show (Val a -> Val a)) => Show (Environment a)
 
@@ -110,7 +116,11 @@ errorMsg = unlines
     _ERROR = "\ESC[1;31mError\ESC[0m"
 
 
-data Closure a = Closure !Text !(Environment a) !(Expr Void a)
+-- | The last field carries the memoised 'Val' values of the @let@-bindings
+-- that were in scope *outside* the lambda at the point the closure was
+-- created (outermost first).  'quote' uses these to re-emit the outer lets
+-- symbolically, preserving sharing across lambda boundaries.
+data Closure a = Closure !Text !(Environment a) !(Expr Void a) ![(Text, Val a)]
 
 deriving instance (Show a, Show (Val a -> Val a)) => Show (Closure a)
 
@@ -150,7 +160,7 @@ pattern VPrim :: (Val a -> Val a) -> Val a
 pattern VPrim f = VHLam Prim f
 
 toVHPi :: Eq a => Val a -> Maybe (Text, Val a, Val a -> Val a)
-toVHPi (VPi a b@(Closure x _ _)) = Just (x, a, instantiate b)
+toVHPi (VPi a b@(Closure x _ _ _)) = Just (x, a, instantiate b)
 toVHPi (VHPi x a b             ) = Just (x, a, b)
 toVHPi  _                        = Nothing
 {-# INLINABLE toVHPi #-}
@@ -263,12 +273,13 @@ infixr 5 ~>
 countEnvironment :: Text -> Environment a -> Int
 countEnvironment x = go (0 :: Int)
   where
-    go !acc Empty             = acc
-    go  acc (Skip env x'    ) = go (if x == x' then acc + 1 else acc) env
-    go  acc (Extend env x' _) = go (if x == x' then acc + 1 else acc) env
+    go !acc Empty                 = acc
+    go  acc (Skip env x'      )   = go (if x == x' then acc + 1 else acc) env
+    go  acc (Extend env x' _  )   = go (if x == x' then acc + 1 else acc) env
+    go  acc (LetBound env x' _)   = go (if x == x' then acc + 1 else acc) env
 
 instantiate :: Eq a => Closure a -> Val a -> Val a
-instantiate (Closure x env t) !u = eval (Extend env x u) t
+instantiate (Closure x env t _) !u = eval (Extend env x u) t
 {-# INLINE instantiate #-}
 
 -- Out-of-env variables have negative de Bruijn levels.
@@ -276,6 +287,11 @@ vVar :: Environment a -> Var -> Val a
 vVar env0 (V x i0) = go env0 i0
   where
     go (Extend env x' v) i
+        | x == x' =
+            if i == 0 then v else go env (i - 1)
+        | otherwise =
+            go env i
+    go (LetBound env x' v) i
         | x == x' =
             if i == 0 then v else go env (i - 1)
         | otherwise =
@@ -454,13 +470,14 @@ eval !env t0 =
         Var v ->
             vVar env v
         Lam _ (FunctionBinding { functionBindingVariable = x, functionBindingAnnotation = a }) t ->
-            VLam (eval env a) (Closure x env t)
+            VLam (eval env a) (Closure x env t (collectLetBindings env))
         Pi _ x a b ->
-            VPi (eval env a) (Closure x env b)
+            VPi (eval env a) (Closure x env b [])
         App t u ->
             vApp (eval env t) (eval env u)
         Let (Binding _ x _ _mA _ a) b ->
-            let !env' = Extend env x (eval env a)
+            let !v   = eval env a
+                !env' = LetBound env x v
             in  eval env' b
         Annot t _ ->
             eval env t
@@ -1155,7 +1172,7 @@ conv !env t0 t0' =
     {-# INLINE fresh #-}
 
     freshClosure :: Closure a -> (Text, Val a, Closure a)
-    freshClosure closure@(Closure x _ _) = (x, snd (fresh x), closure)
+    freshClosure closure@(Closure x _ _ _) = (x, snd (fresh x), closure)
     {-# INLINE freshClosure #-}
 
     convChunks :: VChunks a -> VChunks a -> Bool
@@ -1179,14 +1196,45 @@ data Names
 
 envNames :: Environment a -> Names
 envNames Empty = EmptyNames
-envNames (Skip   env x  ) = Bind (envNames env) x
-envNames (Extend env x _) = Bind (envNames env) x
+envNames (Skip      env x  ) = Bind (envNames env) x
+envNames (Extend    env x _) = Bind (envNames env) x
+envNames (LetBound  env x _) = Bind (envNames env) x
 
 countNames :: Text -> Names -> Int
 countNames x = go 0
   where
     go !acc EmptyNames         = acc
     go  acc (Bind env x') = go (if x == x' then acc + 1 else acc) env
+
+-- | Collect all 'LetBound' entries from an environment, outermost first,
+-- returning the memoised 'Val' for each binding.  These are used by 'quote'
+-- to re-emit outer lets when quoting a lambda.
+collectLetBindings :: Environment a -> [(Text, Val a)]
+collectLetBindings env0 = go env0 []
+  where
+    go Empty             acc = acc
+    go (Skip e _)        acc = go e acc
+    go (Extend e _ _)    acc = go e acc
+    go (LetBound e nm v) acc = go e ((nm, v) : acc)
+
+-- | Produce a modified environment in which every 'LetBound' entry is either:
+--
+--   * converted to 'Skip' (a free variable) if its name is in @emitted@, so
+--     that the body evaluation produces a symbolic reference to the emitted let; or
+--
+--   * converted to 'Extend' (a concrete value) otherwise, so that the value
+--     is inlined into the body rather than left as an unbound reference.
+--
+-- This is used in 'quote' for 'VLam' to correctly handle both the
+-- normal case (outer let emitted) and the shadowing case (outer let not
+-- emitted because its name is already bound in the quoting context).
+freezeOnlyEmitted :: [Text] -> Environment a -> Environment a
+freezeOnlyEmitted _    Empty             = Empty
+freezeOnlyEmitted nms  (Skip e x)        = Skip (freezeOnlyEmitted nms e) x
+freezeOnlyEmitted nms  (Extend e x v)    = Extend (freezeOnlyEmitted nms e) x v
+freezeOnlyEmitted nms  (LetBound e x v)
+    | x `elem` nms = Skip   (freezeOnlyEmitted nms e) x    -- emit as free var
+    | otherwise    = Extend (freezeOnlyEmitted nms e) x v  -- inline value
 
 -- | Quote a value into beta-normal form.
 quote :: forall a. Eq a => Names -> Val a -> Expr Void a
@@ -1198,11 +1246,26 @@ quote !env !t0 =
             Var (V x (countNames x env - i - 1))
         VApp t u ->
             quote env t `qApp` u
-        VLam a (freshClosure -> (x, v, t)) ->
-            Lam
-                mempty
-                (Syntax.makeFunctionBinding x (quote env a))
-                (quoteBind x (instantiate t v))
+        VLam a (Closure x closureEnv body outerLets0) ->
+            -- Split outer lets into:
+            --   newLets      — names not yet in the quoting context; will be emitted
+            --                  as `let` wrappers around the lambda.
+            --   (discarded)  — names already bound in the context; must be inlined
+            --                  (not emitted) to avoid dangling references.
+            let (newLets, _) = partition (\(nm, _) -> countNames nm env == 0) outerLets0
+                emittedNames = map fst newLets
+                letsNames    = foldl (\ns (nm, _) -> Bind ns nm) env newLets
+                freshVar     = VVar x (countNames x letsNames)
+                -- Freeze only the emitted lets (→ free vars in body eval);
+                -- inline shadowed lets (→ their concrete values) so the body
+                -- never references an unbound variable.
+                frozenEnv    = freezeOnlyEmitted emittedNames closureEnv
+                bodyVal      = eval (Extend frozenEnv x freshVar) body
+                quotedLam    = Lam
+                    mempty
+                    (Syntax.makeFunctionBinding x (quote letsNames a))
+                    (quote (Bind letsNames x) bodyVal)
+            in  wrapOuterLets env newLets quotedLam
         VHLam i t ->
             case i of
                 Typed (fresh -> (x, v)) a ->
@@ -1383,7 +1446,7 @@ quote !env !t0 =
     {-# INLINE fresh #-}
 
     freshClosure :: Closure a -> (Text, Val a, Closure a)
-    freshClosure closure@(Closure x _ _) = (x, snd (fresh x), closure)
+    freshClosure closure@(Closure x _ _ _) = (x, snd (fresh x), closure)
     {-# INLINE freshClosure #-}
 
     quoteBind :: Text -> Val a -> Expr Void a
@@ -1398,6 +1461,16 @@ quote !env !t0 =
     quoteRecordField :: Val a -> RecordField Void a
     quoteRecordField = Syntax.makeRecordField . quote env
     {-# INLINE quoteRecordField #-}
+
+    -- | Wrap an expression with a list of outer @let@ bindings.  Each binding
+    -- is quoted from its memoised 'Val' in the 'Names' context built up so
+    -- far, so de Bruijn levels resolve correctly even when earlier outer-let
+    -- names appear free in later binding values.
+    wrapOuterLets :: Names -> [(Text, Val a)] -> Expr Void a -> Expr Void a
+    wrapOuterLets _  []               expr = expr
+    wrapOuterLets ns ((nm, v) : rest) expr =
+        Let (Syntax.makeBinding nm (quote ns v))
+            (wrapOuterLets (Bind ns nm) rest expr)
 
 -- | Normalize an expression in an environment of values. Any variable pointing out of
 --   the environment is treated as opaque free variable.
