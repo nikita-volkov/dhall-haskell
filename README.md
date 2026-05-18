@@ -103,13 +103,8 @@ with the pull request number for any of the above URLs.
 
 ## Building from source
 
-For all of the following instructions, make sure to first check out the
-`dhall-lang` submodule:
-
-```bash
-$ git submodule init
-$ git submodule update
-```
+The repository already vendors the `dhall-lang` Prelude and test fixtures needed
+for local builds and tests.
 
 ### [cabal](https://www.haskell.org/cabal)
 
@@ -258,37 +253,8 @@ repository and follow these instructions instead:
 * [`dhall-lang` - Build the website](https://github.com/dhall-lang/dhall-lang/blob/master/nixops/README.md#updating-dhall-langorg)
 
 If you do need to test changes to the GHCJS code (i.e. the
-[`./dhall-try`](./dhall-try) subdirectory) then stay within this repository, but
-edit the `dhall/dhall-lang` submodule to make the following change:
-
-```diff
-diff --git a/release.nix b/release.nix
---- a/dhall/dhall-lang/release.nix
-+++ b/dhall/dhall-lang/release.nix
-       let
-         json = builtins.fromJSON (builtins.readFile ./nixops/dhall-haskell.json);
- 
--        dhall-haskell =
--          pkgs.fetchFromGitHub {
--            owner = "dhall-lang";
--
--            repo = "dhall-haskell";
--
--            inherit (json) rev sha256 fetchSubmodules;
--          };
-+        dhall-haskell = ../..;
- 
-       in
-         import "${dhall-haskell}/default.nix";
-```
-
-... and then build the website by running:
-
-```bash
-$ nix build --file dhall/dhall-lang/release.nix website
-```
-
-... which will incorporate any GHCJS-related changes you make
+[`./dhall-try`](./dhall-try) subdirectory), clone `dhall-lang` and follow that
+repository's website build instructions.
 
 ## Contributing
 

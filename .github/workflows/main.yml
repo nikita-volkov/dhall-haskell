@@ -45,8 +45,6 @@ jobs:
     steps:
       - name: "Checkout repository"
         uses: actions/checkout@v6
-        with:
-          submodules: true
       - id: setup-haskell-cabal
         name: "Setup Haskell environment"
         uses: haskell-actions/setup@v2.11

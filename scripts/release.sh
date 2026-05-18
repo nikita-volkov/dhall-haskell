@@ -28,8 +28,6 @@ function release {
   skopeo copy --insecure-policy --dest-creds="gabriel439:$(< dockerPassword.txt)" "docker-archive:${DOCKER_ARCHIVE}" "docker://dhallhaskell/${NAME}:${VERSION}"
 }
 
-git submodule update
-
 git clean --force -d -x -- dhall*
 
 for package in dhall-lsp-server dhall-openapi dhall-toml dhall-csv dhall-json dhall-yaml dhall-bash dhall-nix dhall-nixpkgs dhall-docs dhall; do
