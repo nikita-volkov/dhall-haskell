@@ -105,15 +105,21 @@
 module Dhall.Import (
     -- * Import
       load
+    , loadFull
     , loadWithManager
+    , loadFullWithManager
     , loadRelativeTo
+    , loadRelativeToWithStatus
     , loadWithStatus
     , loadWith
+    , expandImports
+    , expandImportsVoid
     , localToPath
     , hashExpression
     , hashExpressionToCode
     , writeExpressionToSemanticCache
     , assertNoImports
+    , makeImportTyper
     , Manager
     , defaultNewManager
     , CacheWarning(..)
@@ -212,7 +218,6 @@ import Dhall.Parser
     )
 import Lens.Micro.Mtl (zoom)
 
-import qualified Codec.CBOR.Write                            as Write
 import qualified Codec.Serialise
 import qualified Control.Exception                           as Exception
 import qualified Control.Monad.State.Strict                  as State
@@ -513,6 +518,37 @@ chainImport (Chained parent) child@(Import importHashed@(ImportHashed _ (Remote 
 chainImport (Chained parent) child =
     return (Chained (canonicalize (parent <> child)))
 
+-- | Build a 'Dhall.TypeCheck.Typer' for 'Import' values using the current
+--   import cache.  The typer looks up each hashed import's type from the cache,
+--   which was computed when that import was first loaded.
+makeImportTyper
+    :: Dhall.Map.Map Chained ImportSemantics
+    -> Dhall.TypeCheck.Typer Import
+makeImportTyper cache import_ =
+    case Dhall.Map.lookup (Chained import_) cache of
+        Just ImportSemantics { importSemanticsType } ->
+            Core.renote importSemanticsType
+        Nothing ->
+            -- This should never happen in a well-formed import graph because
+            -- children are always loaded before their parents.
+            error ("makeImportTyper: import not found in cache: "
+                   <> show (Core.pretty import_))
+
+-- | Compute the type of an already-normalised import expression, using the
+--   import typer built from the current cache.
+computeImportType
+    :: MonadIO io
+    => Dhall.Map.Map Chained ImportSemantics
+    -> Expr Void Import
+    -> NonEmpty Chained
+    -> io (Expr Void Import)
+computeImportType cache importSemantics stack_ =
+    case Dhall.TypeCheck.typeWithA typer mempty (Core.renote importSemantics) of
+        Left  err -> Core.throws (Left (Imported stack_ err))
+        Right t   -> return (Core.renote t)
+  where
+    typer = makeImportTyper cache
+
 -- | Load an import, resulting in a fully resolved, type-checked and normalised
 --   expression. @loadImport@ handles the \"hot\" cache in @Status@ and defers
 --   to @loadImportWithSemanticCache@ for imports that aren't in the @Status@
@@ -562,6 +598,10 @@ loadImportWithSemanticCache
                         Left  err -> throwMissingImport (Imported _stack err)
                         Right e   -> return e
 
+                    -- Recompute the type from the cached semantics using the
+                    -- import typer built from the current cache
+                    importSemanticsType <- computeImportType _cache importSemantics _stack
+
                     return (ImportSemantics {..})
                 else do
                     printWarning $
@@ -574,7 +614,7 @@ loadImportWithSemanticCache
         Nothing -> fetch
     where
         fetch = do
-            ImportSemantics{ importSemantics } <- loadImportWithSemisemanticCache import_
+            sem@ImportSemantics{ importSemantics } <- loadImportWithSemisemanticCache import_
 
             let bytes = encodeExpression (Core.alphaNormalize importSemantics)
 
@@ -591,7 +631,7 @@ loadImportWithSemanticCache
 
                     throwMissingImport (Imported _stack HashMismatch{..})
 
-            return ImportSemantics{..}
+            return sem
 
 
 
@@ -607,7 +647,7 @@ fetchFromSemanticCache expectedHash = Maybe.runMaybeT $ do
 
 -- | Ensure that the given expression is present in the semantic cache. The
 --   given expression should be alpha-beta-normal.
-writeExpressionToSemanticCache :: Expr Void Void -> IO ()
+writeExpressionToSemanticCache :: Expr Void Import -> IO ()
 writeExpressionToSemanticCache expression =
     -- Defaulting to not displaying the warning is for backwards compatibility
     -- with the old behavior
@@ -667,7 +707,7 @@ loadImportWithSemisemanticCache (Chained (Import (ImportHashed _ importType) Cod
 
     mCached <- zoom cacheWarning (fetchFromSemisemanticCache semisemanticHash)
 
-    importSemantics <- case mCached of
+    case mCached of
         Just bytesStrict -> do
             let bytesLazy = Data.ByteString.Lazy.fromStrict bytesStrict
 
@@ -675,34 +715,52 @@ loadImportWithSemisemanticCache (Chained (Import (ImportHashed _ importType) Cod
                 Left err  -> throwMissingImport (Imported _stack err)
                 Right sem -> return sem
 
-            return importSemantics
+            -- Recompute the type from the semisemantic-cached value
+            importSemanticsType <- computeImportType _cache importSemantics _stack
+
+            return (ImportSemantics {..})
 
         Nothing -> do
             let substitutedExpr =
-                  Dhall.Substitution.substitute resolvedExpr _substitutions
+                  Dhall.Substitution.substitute resolvedExpr
+                      (fmap (fmap absurd) _substitutions)
+
+            let typer = makeImportTyper _cache
+
+            let startCtx = fmap (fmap absurd) _startingContext
 
             case Core.shallowDenote parsedImport of
                 -- If this import trivially wraps another import, we can skip
-                -- the type-checking and normalization step as the transitive
-                -- import was already type-checked and normalized
-                Embed _ ->
-                    return (Core.denote substitutedExpr)
+                -- the normalization step as the transitive import was already
+                -- type-checked and normalized
+                Embed _ -> do
+                    let importSemantics = Core.denote substitutedExpr
+
+                    importSemanticsType <-
+                        case Dhall.TypeCheck.typeWithA typer startCtx substitutedExpr of
+                            Left  err -> throwMissingImport (Imported _stack err)
+                            Right t   -> return (Core.denote t)
+
+                    return (ImportSemantics {..})
 
                 _ -> do
-                    case Dhall.TypeCheck.typeWith _startingContext substitutedExpr of
-                        Left  err -> throwMissingImport (Imported _stack err)
-                        Right _   -> return ()
+                    importSemanticsType <-
+                        case Dhall.TypeCheck.typeWithA typer startCtx substitutedExpr of
+                            Left  err -> throwMissingImport (Imported _stack err)
+                            Right t   -> return (Core.denote t)
 
+                    -- Normalize the expression, treating Embed Import values
+                    -- as opaque (ignored by any custom normalizer).
                     let betaNormal =
-                            Core.normalizeWith _normalizer substitutedExpr
+                            Core.normalize substitutedExpr
+
+                    let importSemantics = betaNormal
 
                     let bytes = encodeExpression betaNormal
 
                     zoom cacheWarning (writeToSemisemanticCache semisemanticHash bytes)
 
-                    return betaNormal
-
-    return (ImportSemantics {..})
+                    return (ImportSemantics {..})
 
 -- `as Text` and `as Bytes` imports aren't cached since they are well-typed and
 -- normal by construction
@@ -711,12 +769,14 @@ loadImportWithSemisemanticCache (Chained (Import (ImportHashed _ importType) Raw
 
     -- importSemantics is alpha-beta-normal by construction!
     let importSemantics = TextLit (Chunks [] text)
+    let importSemanticsType = Text
     return (ImportSemantics {..})
 loadImportWithSemisemanticCache (Chained (Import (ImportHashed _ importType) RawBytes)) = do
     bytes <- fetchBytes importType
 
     -- importSemantics is alpha-beta-normal by construction!
     let importSemantics = BytesLit bytes
+    let importSemanticsType = Bytes
     return (ImportSemantics {..})
 
 -- `as Location` imports aren't cached since they are well-typed and normal by
@@ -742,13 +802,15 @@ loadImportWithSemisemanticCache (Chained (Import (ImportHashed _ importType) Loc
                 App (Field locationType $ Core.makeFieldSelection "Environment")
                   (TextLit (Chunks [] (Core.pretty env)))
 
+    let importSemanticsType = locationType
+
     return (ImportSemantics {..})
 
 -- The semi-semantic hash of an expression is computed from the fully resolved
 -- AST (without normalising or type-checking it first). See
 -- https://github.com/dhall-lang/dhall-haskell/issues/1098 for further
 -- discussion.
-computeSemisemanticHash :: Expr Void Void -> Dhall.Crypto.SHA256Digest
+computeSemisemanticHash :: Codec.Serialise.Serialise (Expr Void a) => Expr Void a -> Dhall.Crypto.SHA256Digest
 computeSemisemanticHash resolvedExpr = hashExpression resolvedExpr
 
 -- Fetch encoded normal form from "semi-semantic cache"
@@ -1052,10 +1114,12 @@ getCacheBaseDirectory = alternative₀ <|> alternative₁ <|> alternative₂
 -- forms.
 normalizeHeadersIn :: URL -> StateT Status IO URL
 normalizeHeadersIn url@URL { headers = Just headersExpression } = do
-    Status { _stack } <- State.get
+    Status { _stack, _cache } <- State.get
     loadedExpr <- loadWith headersExpression
+    -- Fully expand hashed imports for headers (we need actual values, not references)
+    let loadedFull = expandImports _cache loadedExpr
     let handler (e :: SomeException) = throwMissingImport (Imported _stack e)
-    normalized <- liftIO $ handle handler (normalizeHeaders loadedExpr)
+    normalized <- liftIO $ handle handler (normalizeHeaders loadedFull)
     return url { headers = Just (fmap absurd normalized) }
 
 normalizeHeadersIn url = return url
@@ -1125,7 +1189,10 @@ originHeadersLoader headersExpr = do
     doLoad = do
         partialExpr <- liftIO headersExpr
         loaded <- loadWith (Note headersSrc (ImportAlt partialExpr emptyOriginHeaders))
-        liftIO (toOriginHeaders loaded)
+        status <- State.get
+        -- Fully expand imports for origin headers (we need actual values)
+        let loadedFull = expandImports (_cache status) loaded
+        liftIO (toOriginHeaders loadedFull)
 
 -- | Default starting `Status`, importing relative to the given directory.
 emptyStatus :: FilePath -> Status
@@ -1193,7 +1260,7 @@ remoteStatusWithManager newManager url =
     You can configure the desired behavior through the initial `Status` that you
     supply
 -}
-loadWith :: Expr Src Import -> StateT Status IO (Expr Src Void)
+loadWith :: Expr Src Import -> StateT Status IO (Expr Src Import)
 loadWith expr₀ = case expr₀ of
   Embed import₀ -> do
     Status {..} <- State.get
@@ -1229,7 +1296,11 @@ loadWith expr₀ = case expr₀ of
     ImportSemantics {..} <- loadImport child
     zoom stack (State.put _stack)
 
-    return (Core.renote importSemantics)
+    -- Proposal 2: if the import has an integrity check, preserve it as an
+    -- opaque reference in the normal form instead of inlining its content.
+    case hash (importHashed (chainedImport child)) of
+        Just _  -> return (Embed (chainedImport child))
+        Nothing -> return (Core.renote importSemantics)
 
   ImportAlt a b -> loadWith a `catch` handler₀
     where
@@ -1237,7 +1308,7 @@ loadWith expr₀ = case expr₀ of
       is exception = Maybe.isJust (Exception.fromException @e exception)
 
       isNotResolutionError exception =
-              is @(Imported (TypeError Src Void)) exception
+              is @(Imported (TypeError Src Import)) exception
           ||  is @(Imported  Cycle              ) exception
           ||  is @(Imported  HashMismatch       ) exception
           ||  is @(Imported  ParseError         ) exception
@@ -1270,46 +1341,97 @@ loadWith expr₀ = case expr₀ of
   Field a b            -> Field <$> loadWith a <*> pure b
   expression           -> Syntax.unsafeSubExpressions loadWith expression
 
--- | Resolve all imports within an expression
-load :: Expr Src Import -> IO (Expr Src Void)
+-- | Resolve all imports within an expression, preserving hashed imports as
+--   opaque references (Proposal 2).
+load :: Expr Src Import -> IO (Expr Src Import)
 load = loadWithManager defaultNewManager
 
 -- | See 'load'.
-loadWithManager :: IO Manager -> Expr Src Import -> IO (Expr Src Void)
+loadWithManager :: IO Manager -> Expr Src Import -> IO (Expr Src Import)
 loadWithManager newManager =
     loadWithStatus
         (makeEmptyStatus newManager defaultOriginHeaders ".")
         UseSemanticCache
 
 -- | Resolve all imports within an expression, importing relative to the given
--- directory.
-loadRelativeTo :: FilePath -> SemanticCacheMode -> Expr Src Import -> IO (Expr Src Void)
+-- directory. Hashed imports are preserved as opaque references (Proposal 2).
+loadRelativeTo :: FilePath -> SemanticCacheMode -> Expr Src Import -> IO (Expr Src Import)
 loadRelativeTo parentDirectory = loadWithStatus
     (makeEmptyStatus defaultNewManager defaultOriginHeaders parentDirectory)
+
+-- | Like 'loadRelativeTo', but also returns the final 'Status' (which includes
+--   the import cache needed for building a typer via 'makeImportTyper').
+loadRelativeToWithStatus
+    :: FilePath
+    -> SemanticCacheMode
+    -> Expr Src Import
+    -> IO (Expr Src Import, Status)
+loadRelativeToWithStatus parentDirectory semanticCacheMode expression =
+    State.runStateT
+        (loadWith expression)
+        (makeEmptyStatus defaultNewManager defaultOriginHeaders parentDirectory)
+            { _semanticCacheMode = semanticCacheMode }
 
 -- | See 'loadRelativeTo'.
 loadWithStatus
     :: Status
     -> SemanticCacheMode
     -> Expr Src Import
-    -> IO (Expr Src Void)
+    -> IO (Expr Src Import)
 loadWithStatus status semanticCacheMode expression =
     State.evalStateT
         (loadWith expression)
         status { _semanticCacheMode = semanticCacheMode }
 
-encodeExpression :: Expr Void Void -> Data.ByteString.ByteString
-encodeExpression expression = bytesStrict
-  where
-    intermediateExpression :: Expr Void Import
-    intermediateExpression = fmap absurd expression
+-- | Like 'load', but fully inlines all imports (including hashed ones).
+--   Use this when you need an 'Expr Src Void' for decoding to Haskell values.
+loadFull :: Expr Src Import -> IO (Expr Src Void)
+loadFull = loadFullWithManager defaultNewManager
 
-    encoding = Codec.Serialise.encode intermediateExpression
+-- | See 'loadFull'.
+loadFullWithManager :: IO Manager -> Expr Src Import -> IO (Expr Src Void)
+loadFullWithManager newManager expression = do
+    (expr, status) <- State.runStateT
+        (loadWith expression)
+        (makeEmptyStatus newManager defaultOriginHeaders ".")
+            { _semanticCacheMode = UseSemanticCache }
+    return (expandImports (_cache status) expr)
 
-    bytesStrict = Write.toStrictByteString encoding
+-- | Fully expand all 'Embed Import' references in an expression using the
+--   import cache from a completed 'loadWith' run.
+expandImports
+    :: Dhall.Map.Map Chained ImportSemantics
+    -> Expr Src Import
+    -> Expr Src Void
+expandImports cache expr = expr >>= \import_ ->
+    case Dhall.Map.lookup (Chained import_) cache of
+        Just ImportSemantics { importSemantics } ->
+            Core.renote (expandImportsVoid cache importSemantics)
+        Nothing ->
+            error ("expandImports: import not found in cache: "
+                   <> show (Core.pretty import_))
 
--- | Hash a fully resolved expression
-hashExpression :: Expr Void Void -> Dhall.Crypto.SHA256Digest
+-- | Like 'expandImports' but for 'Expr Void Import'.
+expandImportsVoid
+    :: Dhall.Map.Map Chained ImportSemantics
+    -> Expr Void Import
+    -> Expr Void Void
+expandImportsVoid cache expr = expr >>= \import_ ->
+    case Dhall.Map.lookup (Chained import_) cache of
+        Just ImportSemantics { importSemantics } ->
+            expandImportsVoid cache importSemantics
+        Nothing ->
+            error ("expandImportsVoid: import not found in cache: "
+                   <> show (Core.pretty import_))
+
+encodeExpression :: Codec.Serialise.Serialise (Expr Void a) => Expr Void a -> Data.ByteString.ByteString
+encodeExpression = Data.ByteString.Lazy.toStrict . Dhall.Binary.encodeExpression
+
+-- | Hash a fully resolved expression.
+--   When the expression contains 'Embed Import' references (i.e. is an
+--   'Expr Void Import'), hashed sub-imports are included as opaque references
+--   in the hash rather than their inlined content (Proposal 2).
+hashExpression :: Codec.Serialise.Serialise (Expr Void a) => Expr Void a -> Dhall.Crypto.SHA256Digest
 hashExpression = Dhall.Crypto.sha256Hash . encodeExpression
 
 {-| Convenience utility to hash a fully resolved expression and return the
@@ -1318,7 +1440,7 @@ hashExpression = Dhall.Crypto.sha256Hash . encodeExpression
     In other words, the output of this function can be pasted into Dhall
     source code to add an integrity check to an import
 -}
-hashExpressionToCode :: Expr Void Void -> Text
+hashExpressionToCode :: Codec.Serialise.Serialise (Expr Void a) => Expr Void a -> Text
 hashExpressionToCode expr =
     "sha256:" <> Text.pack (show (hashExpression expr))
 

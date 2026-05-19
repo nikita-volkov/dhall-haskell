@@ -82,7 +82,7 @@ main = do
             Left  err  -> Control.Exception.throwIO err
             Right expr -> return expr
 
-        expr' <- Dhall.Import.load expr
+        expr' <- Dhall.Import.loadFull expr
         case Dhall.TypeCheck.typeOf expr' of
             Left  err -> Control.Exception.throwIO err
             Right _   -> return ()

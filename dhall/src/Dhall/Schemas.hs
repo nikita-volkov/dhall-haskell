@@ -135,7 +135,7 @@ decodeSchemas (RecordLit keyValues) = do
     let typeMetadata = Data.Map.fromList $ do
             (name, (_Type, _default)) <- Map.toList m
 
-            return (Import.hashExpression (Syntax.denote _Type), (name, _default))
+            return (Import.hashExpression (fmap Void.absurd (Syntax.denote _Type)), (name, _default))
 
     return typeMetadata
 decodeSchemas  _ =
@@ -149,8 +149,8 @@ rewriteWithSchemas
     -- ^ Expression to simplify using the supplied schemas
     -> IO (Expr Src Import)
 rewriteWithSchemas _schemas expression = do
-    resolvedSchemas    <- Import.load _schemas
-    resolvedExpression <- Import.load expression
+    resolvedSchemas    <- Import.loadFull _schemas
+    resolvedExpression <- Import.loadFull expression
 
     _ <- Core.throws (TypeCheck.typeOf resolvedSchemas)
     _ <- Core.throws (TypeCheck.typeOf resolvedExpression)
@@ -164,7 +164,7 @@ rewriteWithSchemas _schemas expression = do
 
     let schemasRewrite subExpression@(RecordLit keyValues) =
             Maybe.fromMaybe subExpression $ do
-                let substitutions = Map.singleton "schemas" normalizedSchemas
+                let substitutions = Data.Map.singleton "schemas" normalizedSchemas
 
                 let substitutedExpression =
                         Substitution.substitute subExpression substitutions
@@ -173,7 +173,7 @@ rewriteWithSchemas _schemas expression = do
                     Left _ ->
                         empty
                     Right subExpressionType ->
-                        return (Import.hashExpression (Syntax.denote subExpressionType))
+                        return (Import.hashExpression (fmap Void.absurd (Syntax.denote subExpressionType)))
 
                 (name, _default) <- Data.Map.lookup hash typeMetadata
 

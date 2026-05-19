@@ -80,6 +80,7 @@ import qualified Data.Text.IO
 import qualified Dhall.Context
 import qualified Dhall.Core                       as Core
 import qualified Dhall.Import
+import qualified Dhall.Import.Types
 import qualified Dhall.Parser
 import qualified Dhall.Pretty.Internal
 import qualified Dhall.Substitution
@@ -271,7 +272,11 @@ resolveAndStatusWithSettings settings expression = do
 
     (resolved, status') <- State.runStateT (Dhall.Import.loadWith expression) status
 
-    let substituted = Dhall.Substitution.substitute resolved (view substitutions settings)
+    -- Fully expand hashed-import references into their content, so that
+    -- downstream callers (type-checking, Decoders, etc.) receive Expr Src Void.
+    let fullyResolved = Dhall.Import.expandImports (Dhall.Import.Types._cache status') resolved
+
+    let substituted = Dhall.Substitution.substitute fullyResolved (view substitutions settings)
 
     pure (substituted, status')
 

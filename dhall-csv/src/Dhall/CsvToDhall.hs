@@ -242,7 +242,7 @@ resolveSchemaExpr code = do
       case Dhall.Parser.exprFromText "\n\ESC[1;31m(schema)\ESC[0m" code of
         Left  err              -> throwIO err
         Right parsedExpression -> return parsedExpression
-    Dhall.Import.load parsedExpression
+    Dhall.Import.loadFull parsedExpression
 
 -- | Check that the Dhall type expression actually has type 'Type'
 typeCheckSchemaExpr :: (Exception e, MonadCatch m)

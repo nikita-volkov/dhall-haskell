@@ -161,7 +161,8 @@ load settings (FileIdentifier chained) expr (Cache graph cache) = do
   (do (expr', status') <- runStateT (Import.loadWith expr) status
       let cache' = view Import.cache status'
           graph' = view Import.graph status'
-      return . Right $ (Cache graph' cache', expr'))
+          exprFull = Import.expandImports cache' expr'
+      return . Right $ (Cache graph' cache', exprFull))
     `catch` (\e -> return . Left $ ErrorImportSourced e)
     `catch` (\e -> return . Left $ ErrorInternal e)
 
