@@ -78,7 +78,6 @@ module Dhall.Parser.Token (
     _Double,
     _Text,
     _TextReplace,
-    _TextEqual,
     _TextShow,
     _Date,
     _DateShow,
@@ -1198,13 +1197,6 @@ _Text = builtin "Text"
 -}
 _TextReplace :: Parser ()
 _TextReplace = builtin "Text/replace"
-
-{-| Parse the @Text/equal@ built-in
-
-    This corresponds to the @Text-equal@ rule from the official grammar
--}
-_TextEqual :: Parser ()
-_TextEqual = builtin "Text/equal"
 
 {-| Parse the @Text/show@ built-in
 

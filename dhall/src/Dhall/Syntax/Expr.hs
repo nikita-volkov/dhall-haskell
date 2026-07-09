@@ -142,8 +142,6 @@ data Expr s a
     | TextLit (Chunks s a)
     -- | > TextAppend x y                           ~  x ++ y
     | TextAppend (Expr s a) (Expr s a)
-    -- | > TextEqual                                ~  Text/equal
-    | TextEqual
     -- | > TextReplace                              ~ Text/replace
     | TextReplace
     -- | > TextShow                                 ~  Text/show

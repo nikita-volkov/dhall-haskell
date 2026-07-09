@@ -157,7 +157,6 @@ decodeExpressionInternal decodeEmbed = go
                        | sb == "Text/show"         -> return TextShow
                        | sb == "Time/show"         -> return TimeShow
                     10 | sb == "List/build"        -> return ListBuild
-                       | sb == "Text/equal"        -> return TextEqual
                     11 | sb == "Double/show"       -> return DoubleShow
                        | sb == "List/length"       -> return ListLength
                        | sb == "Natural/odd"       -> return NaturalOdd
@@ -768,9 +767,6 @@ encodeExpressionInternal encodeEmbed = go
 
         Text ->
             Encoding.encodeUtf8ByteArray "Text"
-
-        TextEqual ->
-            Encoding.encodeUtf8ByteArray "Text/equal"
 
         TextReplace ->
             Encoding.encodeUtf8ByteArray "Text/replace"

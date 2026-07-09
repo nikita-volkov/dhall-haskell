@@ -384,7 +384,6 @@ instance (Arbitrary s, Arbitrary a) => Arbitrary (Expr s a) where
             % (1 :: W "Text")
             % (1 :: W "TextLit")
             % (1 :: W "TextAppend")
-            % (1 :: W "TextEqual")
             % (1 :: W "TextReplace")
             % (1 :: W "TextShow")
             % (1 :: W "Date")

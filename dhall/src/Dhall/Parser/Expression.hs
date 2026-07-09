@@ -750,7 +750,6 @@ parsers embedded = Parsers{..}
                     'T' ->
                         choice
                             [ TextReplace      <$ _TextReplace
-                            , TextEqual        <$ _TextEqual
                             , TextShow         <$ _TextShow
                             , Text             <$ _Text
                             , TimeZoneShow     <$ _TimeZoneShow
